@@ -107,13 +107,13 @@ def run_maxcut(mode):
         backend = AerSimulator()
 
     elif mode == "Noisy Simulator":
-        service = QiskitRuntimeService(channel="ibm_quantum", token=API_KEY)
+        service = QiskitRuntimeService(channel="ibm_quantum_platform", token=API_KEY)
         real_backend = service.backend("ibm_brisbane")
         noise_model = NoiseModel.from_backend(real_backend)
         backend = AerSimulator(noise_model=noise_model)
 
     elif mode == "Real Quantum":
-        service = QiskitRuntimeService(channel="ibm_quantum", token=API_KEY)
+        service = QiskitRuntimeService(channel="ibm_quantum_platform", token=API_KEY)
         backends = service.backends(simulator=False, operational=True)
         backend = min(backends, key=lambda b: b.status().pending_jobs)
         st.warning("⚠️ Real quantum execution may take several minutes to hours.")
