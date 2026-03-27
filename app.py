@@ -119,8 +119,17 @@ def run_maxcut(mode):
             token=API_KEY
         )
 
-        if mode == "Noisy Simulator":
-            backend = service.backend("ibm_brisbane")
+        elif mode == "Noisy Simulator":
+              backends = service.backends(simulator=False, operational=True)
+              backend = min(backends, key=lambda b: b.status().pending_jobs)
+
+              noise_model = NoiseModel.from_backend(backend)
+              backend = AerSimulator(noise_model=noise_model)
+
+              tqc = transpile(qc, backend)
+              job = backend.run(tqc, shots=1024)
+              result = job.result()
+              counts = result.get_counts()
 
         elif mode == "Real Quantum":
             backends = service.backends(simulator=False, operational=True)
