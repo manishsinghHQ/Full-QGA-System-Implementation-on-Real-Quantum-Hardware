@@ -12,7 +12,7 @@ from qiskit_ibm_runtime import QiskitRuntimeService
 # =========================
 # 🔐 IBM API (Paste your key)
 # =========================
-API_KEY = "PASTE_YOUR_API_KEY_HERE"
+API_KEY = "YKJtS_0-SP7elloXTKIK9riL-jH9jjZbt9Teyw7DJ1lc"
 
 # =========================
 # 🟢 SYSTEM 1: QGA KNAPSACK
@@ -36,6 +36,8 @@ def fitness(sol, weights, values, capacity):
     return v if w <= capacity else 0
 
 def update(q_pop, pop, best):
+    if best is None:
+        return q_pop  # skip update safely
     delta = 0.01
     for i in range(len(q_pop)):
         for j in range(len(q_pop[i])):
@@ -56,18 +58,21 @@ def run_qga(n_items=100, generations=50):
     history = []
 
     for _ in range(generations):
-        pop = measure(q_pop)
-        fits = [fitness(p, weights, values, capacity) for p in pop]
+    pop = measure(q_pop)
+    fits = fitness_vectorized(pop, weights, values, capacity)
 
-        idx = np.argmax(fits)
-        if fits[idx] > best_fit:
-            best_fit = fits[idx]
-            best = pop[idx]
+    idx = np.argmax(fits)
 
+    # ALWAYS assign best in first iteration
+    if best is None or fits[idx] > best_fit:
+        best_fit = fits[idx]
+        best = pop[idx]
+
+    # Only update if best exists
+    if best is not None:
         q_pop = update(q_pop, pop, best)
-        history.append(best_fit)
 
-    return best_fit, history
+    history.append(best_fit)
 
 # =========================
 # 🔵 SYSTEM 2: MAX-CUT PQC
