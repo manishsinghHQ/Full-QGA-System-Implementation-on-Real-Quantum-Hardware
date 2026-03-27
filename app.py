@@ -6,14 +6,7 @@ import json
 # Qiskit imports
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
-from qiskit_aer.noise import NoiseModel
-from qiskit_ibm_runtime import QiskitRuntimeService,Sampler
-
-
-# =========================
-# 🔐 Secure API Key
-# =========================
-API_KEY = st.secrets.get("IBM_API_KEY", None)
+from qiskit_aer.noise import NoiseModel, depolarizing_error
 
 # =========================
 # 🟢 SYSTEM 1: QGA KNAPSACK
@@ -100,57 +93,52 @@ def random_maxcut():
         best = max(best, score)
     return best
 
+# =========================
+# 🔧 NOISE MODEL (LOCAL)
+# =========================
+def get_noise_model():
+    noise_model = NoiseModel()
 
+    error1 = depolarizing_error(0.01, 1)
+    error2 = depolarizing_error(0.02, 2)
 
+    noise_model.add_all_qubit_quantum_error(error1, ['ry', 'h'])
+    noise_model.add_all_qubit_quantum_error(error2, ['cx'])
+
+    return noise_model
+
+# =========================
+# 🚀 MAX-CUT RUNNER (STABLE)
+# =========================
 def run_maxcut(mode):
     params = np.random.rand(6)
     qc = create_circuit(params)
 
+    # 🟢 Ideal
     if mode == "Ideal Simulator":
         backend = AerSimulator()
-        tqc = transpile(qc, backend)
-        job = backend.run(tqc, shots=1024)
-        result = job.result()
-        counts = result.get_counts()
 
-    else:
-        service = QiskitRuntimeService(
-            channel="ibm_quantum_platform",
-            token=API_KEY
-        )
+    # 🟡 Noisy (LOCAL)
+    elif mode == "Noisy Simulator":
+        noise_model = get_noise_model()
+        backend = AerSimulator(noise_model=noise_model)
 
-        if mode == "Noisy Simulator":
-              backends = service.backends(simulator=False, operational=True)
-              backend = min(backends, key=lambda b: b.status().pending_jobs)
+    # 🔴 Real (Simulated fallback)
+    elif mode == "Real Quantum":
+        st.warning("⚠️ Real quantum simulated (queue & access limitations)")
+        backend = AerSimulator()
 
-              noise_model = NoiseModel.from_backend(backend)
-              backend = AerSimulator(noise_model=noise_model)
-
-              tqc = transpile(qc, backend)
-              job = backend.run(tqc, shots=1024)
-              result = job.result()
-              counts = result.get_counts()
-
-        elif mode == "Real Quantum":
-            backends = service.backends(simulator=False, operational=True)
-            backend = min(backends, key=lambda b: b.status().pending_jobs)
-            st.warning("⚠️ Real quantum jobs may take time (queue).")
-
-        # ✅ Use Sampler instead of backend.run()
-        sampler = Sampler(mode=backend)
-
-        job = sampler.run([qc])
-        result = job.result()
-
-        quasi_dist = result.quasi_dists[0]
-
-        # Convert quasi distribution → counts
-        counts = {format(k, "06b"): int(v * 1024) for k, v in quasi_dist.items()}
+    # Run circuit
+    tqc = transpile(qc, backend)
+    job = backend.run(tqc, shots=1024)
+    result = job.result()
+    counts = result.get_counts()
 
     best_bitstring = max(counts, key=lambda x: maxcut_cost(x))
     best_score = maxcut_cost(best_bitstring)
 
     return counts, best_score, best_bitstring
+
 # =========================
 # 🎨 STREAMLIT UI
 # =========================
@@ -194,35 +182,32 @@ elif option == "Max-Cut PQC":
     )
 
     if st.button("Run Max-Cut"):
-        if mode != "Ideal Simulator" and API_KEY is None:
-            st.error("⚠️ Please add IBM API key in secrets.toml")
-        else:
-            with st.spinner("Running Quantum Circuit..."):
-                counts, score, bitstring = run_maxcut(mode)
+        with st.spinner("Running Quantum Circuit..."):
+            counts, score, bitstring = run_maxcut(mode)
 
-            st.success(f"Max-Cut Score: {score}")
-            st.write("Best Bitstring:", bitstring)
+        st.success(f"Max-Cut Score: {score}")
+        st.write("Best Bitstring:", bitstring)
 
-            classical_score = random_maxcut()
-            st.write("Classical Random Score:", classical_score)
+        classical_score = random_maxcut()
+        st.write("Classical Random Score:", classical_score)
 
-            st.subheader("Counts")
-            st.json(counts)
+        st.subheader("Counts")
+        st.json(counts)
 
-            fig, ax = plt.subplots()
-            ax.bar(list(counts.keys())[:10], list(counts.values())[:10])
-            plt.xticks(rotation=90)
-            st.pyplot(fig)
+        fig, ax = plt.subplots()
+        ax.bar(list(counts.keys())[:10], list(counts.values())[:10])
+        plt.xticks(rotation=90)
+        st.pyplot(fig)
 
-            data = {
-                "mode": mode,
-                "score": score,
-                "best_bitstring": bitstring,
-                "counts": counts
-            }
+        data = {
+            "mode": mode,
+            "score": score,
+            "best_bitstring": bitstring,
+            "counts": counts
+        }
 
-            st.download_button(
-                "Download JSON",
-                json.dumps(data, indent=4),
-                file_name="results.json"
-            )
+        st.download_button(
+            "Download JSON",
+            json.dumps(data, indent=4),
+            file_name="results.json"
+        )
