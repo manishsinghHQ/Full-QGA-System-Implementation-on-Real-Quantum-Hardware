@@ -137,7 +137,7 @@ def run_maxcut(mode):
             st.warning("⚠️ Real quantum jobs may take time (queue).")
 
         # ✅ Use Sampler instead of backend.run()
-        sampler = Sampler(backend=backend)
+        sampler = Sampler(mode=backend)
 
         job = sampler.run([qc])
         result = job.result()
