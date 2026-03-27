@@ -100,7 +100,7 @@ def random_maxcut():
         best = max(best, score)
     return best
 
-from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
+
 
 def run_maxcut(mode):
     params = np.random.rand(6)
