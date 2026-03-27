@@ -119,7 +119,7 @@ def run_maxcut(mode):
             token=API_KEY
         )
 
-        elif mode == "Noisy Simulator":
+        if mode == "Noisy Simulator":
               backends = service.backends(simulator=False, operational=True)
               backend = min(backends, key=lambda b: b.status().pending_jobs)
 
