@@ -7,7 +7,8 @@ import json
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 from qiskit_aer.noise import NoiseModel
-from qiskit_ibm_runtime import QiskitRuntimeService
+from qiskit_ibm_runtime import QiskitRuntimeService,Sampler
+
 
 # =========================
 # 🔐 Secure API Key
@@ -99,36 +100,48 @@ def random_maxcut():
         best = max(best, score)
     return best
 
+from qiskit_ibm_runtime import QiskitRuntimeService, Sampler
+
 def run_maxcut(mode):
     params = np.random.rand(6)
     qc = create_circuit(params)
 
     if mode == "Ideal Simulator":
         backend = AerSimulator()
+        tqc = transpile(qc, backend)
+        job = backend.run(tqc, shots=1024)
+        result = job.result()
+        counts = result.get_counts()
 
-    elif mode == "Noisy Simulator":
-        service = QiskitRuntimeService(channel="ibm_quantum_platform", token=API_KEY)
-        real_backend = service.backend("ibm_brisbane")
-        noise_model = NoiseModel.from_backend(real_backend)
-        backend = AerSimulator(noise_model=noise_model)
+    else:
+        service = QiskitRuntimeService(
+            channel="ibm_quantum_platform",
+            token=API_KEY
+        )
 
-    elif mode == "Real Quantum":
-        service = QiskitRuntimeService(channel="ibm_quantum_platform", token=API_KEY)
-        backends = service.backends(simulator=False, operational=True)
-        backend = min(backends, key=lambda b: b.status().pending_jobs)
-        st.warning("⚠️ Real quantum execution may take several minutes to hours.")
+        if mode == "Noisy Simulator":
+            backend = service.backend("ibm_brisbane")
 
-    tqc = transpile(qc, backend)
-    job = backend.run(tqc, shots=1024)
+        elif mode == "Real Quantum":
+            backends = service.backends(simulator=False, operational=True)
+            backend = min(backends, key=lambda b: b.status().pending_jobs)
+            st.warning("⚠️ Real quantum jobs may take time (queue).")
 
-    result = job.result()
-    counts = result.get_counts()
+        # ✅ Use Sampler instead of backend.run()
+        sampler = Sampler(backend=backend)
+
+        job = sampler.run([qc])
+        result = job.result()
+
+        quasi_dist = result.quasi_dists[0]
+
+        # Convert quasi distribution → counts
+        counts = {format(k, "06b"): int(v * 1024) for k, v in quasi_dist.items()}
 
     best_bitstring = max(counts, key=lambda x: maxcut_cost(x))
     best_score = maxcut_cost(best_bitstring)
 
     return counts, best_score, best_bitstring
-
 # =========================
 # 🎨 STREAMLIT UI
 # =========================
