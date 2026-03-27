@@ -10,9 +10,9 @@ from qiskit_aer.noise import NoiseModel
 from qiskit_ibm_runtime import QiskitRuntimeService
 
 # =========================
-# 🔐 IBM API (Paste your key)
+# 🔐 Secure API Key
 # =========================
-API_KEY = "YKJtS_0-SP7elloXTKIK9riL-jH9jjZbt9Teyw7DJ1lc"
+API_KEY = st.secrets.get("IBM_API_KEY", None)
 
 # =========================
 # 🟢 SYSTEM 1: QGA KNAPSACK
@@ -21,23 +21,17 @@ def init_population(pop_size, n_items):
     return np.ones((pop_size, n_items, 2)) / np.sqrt(2)
 
 def measure(q_pop):
-    pop = []
-    for individual in q_pop:
-        bits = []
-        for qbit in individual:
-            prob = qbit[1]**2
-            bits.append(1 if np.random.rand() < prob else 0)
-        pop.append(bits)
-    return np.array(pop)
+    probs = q_pop[:, :, 1]**2
+    return (np.random.rand(*probs.shape) < probs).astype(int)
 
-def fitness(sol, weights, values, capacity):
-    w = np.sum(sol * weights)
-    v = np.sum(sol * values)
-    return v if w <= capacity else 0
+def fitness_vectorized(pop, weights, values, capacity):
+    weights_sum = pop @ weights
+    values_sum = pop @ values
+    return np.where(weights_sum <= capacity, values_sum, 0)
 
 def update(q_pop, pop, best):
     if best is None:
-        return q_pop  # skip update safely
+        return q_pop
     delta = 0.01
     for i in range(len(q_pop)):
         for j in range(len(q_pop[i])):
@@ -58,21 +52,21 @@ def run_qga(n_items=100, generations=50):
     history = []
 
     for _ in range(generations):
-    pop = measure(q_pop)
-    fits = fitness_vectorized(pop, weights, values, capacity)
+        pop = measure(q_pop)
+        fits = fitness_vectorized(pop, weights, values, capacity)
 
-    idx = np.argmax(fits)
+        idx = np.argmax(fits)
 
-    # ALWAYS assign best in first iteration
-    if best is None or fits[idx] > best_fit:
-        best_fit = fits[idx]
-        best = pop[idx]
+        if best is None or fits[idx] > best_fit:
+            best_fit = fits[idx]
+            best = pop[idx]
 
-    # Only update if best exists
-    if best is not None:
-        q_pop = update(q_pop, pop, best)
+        if best is not None:
+            q_pop = update(q_pop, pop, best)
 
-    history.append(best_fit)
+        history.append(best_fit)
+
+    return best_fit, history
 
 # =========================
 # 🔵 SYSTEM 2: MAX-CUT PQC
@@ -97,9 +91,16 @@ def create_circuit(params, n=6):
 def maxcut_cost(bitstring):
     return sum(1 for i, j in edges if bitstring[i] != bitstring[j])
 
+def random_maxcut():
+    best = 0
+    for _ in range(500):
+        sol = np.random.randint(0, 2, 6)
+        score = sum(1 for i, j in edges if sol[i] != sol[j])
+        best = max(best, score)
+    return best
+
 def run_maxcut(mode):
     params = np.random.rand(6)
-
     qc = create_circuit(params)
 
     if mode == "Ideal Simulator":
@@ -113,7 +114,9 @@ def run_maxcut(mode):
 
     elif mode == "Real Quantum":
         service = QiskitRuntimeService(channel="ibm_quantum", token=API_KEY)
-        backend = service.least_busy(simulator=False)
+        backends = service.backends(simulator=False, operational=True)
+        backend = min(backends, key=lambda b: b.status().pending_jobs)
+        st.warning("⚠️ Real quantum execution may take several minutes to hours.")
 
     tqc = transpile(qc, backend)
     job = backend.run(tqc, shots=1024)
@@ -121,13 +124,10 @@ def run_maxcut(mode):
     result = job.result()
     counts = result.get_counts()
 
-    # Compute best score
-    best_score = 0
-    for bitstring in counts:
-        score = maxcut_cost(bitstring)
-        best_score = max(best_score, score)
+    best_bitstring = max(counts, key=lambda x: maxcut_cost(x))
+    best_score = maxcut_cost(best_bitstring)
 
-    return counts, best_score
+    return counts, best_score, best_bitstring
 
 # =========================
 # 🎨 STREAMLIT UI
@@ -155,7 +155,9 @@ if option == "Knapsack QGA":
 
         fig, ax = plt.subplots()
         ax.plot(history)
-        ax.set_title("Convergence Graph")
+        ax.set_xlabel("Generations")
+        ax.set_ylabel("Best Fitness")
+        ax.grid(True)
         st.pyplot(fig)
 
 # =========================
@@ -170,29 +172,35 @@ elif option == "Max-Cut PQC":
     )
 
     if st.button("Run Max-Cut"):
-        with st.spinner("Running Quantum Circuit..."):
-            counts, score = run_maxcut(mode)
+        if mode != "Ideal Simulator" and API_KEY is None:
+            st.error("⚠️ Please add IBM API key in secrets.toml")
+        else:
+            with st.spinner("Running Quantum Circuit..."):
+                counts, score, bitstring = run_maxcut(mode)
 
-        st.success(f"Max-Cut Score: {score}")
+            st.success(f"Max-Cut Score: {score}")
+            st.write("Best Bitstring:", bitstring)
 
-        st.subheader("Counts")
-        st.json(counts)
+            classical_score = random_maxcut()
+            st.write("Classical Random Score:", classical_score)
 
-        # Plot
-        fig, ax = plt.subplots()
-        ax.bar(list(counts.keys())[:10], list(counts.values())[:10])
-        plt.xticks(rotation=90)
-        st.pyplot(fig)
+            st.subheader("Counts")
+            st.json(counts)
 
-        # Save JSON
-        data = {
-            "mode": mode,
-            "score": score,
-            "counts": counts
-        }
+            fig, ax = plt.subplots()
+            ax.bar(list(counts.keys())[:10], list(counts.values())[:10])
+            plt.xticks(rotation=90)
+            st.pyplot(fig)
 
-        st.download_button(
-            "Download JSON",
-            json.dumps(data, indent=4),
-            file_name="results.json"
-        )
+            data = {
+                "mode": mode,
+                "score": score,
+                "best_bitstring": bitstring,
+                "counts": counts
+            }
+
+            st.download_button(
+                "Download JSON",
+                json.dumps(data, indent=4),
+                file_name="results.json"
+            )
